@@ -12,6 +12,21 @@ class StatedAnimation(Animation):
         self.animation: Animation = animation_type(mobject, *args, **kwargs)
         super().__init__(mobject)
 
+    @classmethod
+    def from_function(cls, stated_keys: list[str], func: FunctionType,
+                      mobject: Mobject, *args, **kwargs):
+        mobject.generate_target()
+        target = mobject.target
+        func(target, *args, **kwargs)
+        stated_kwargs = __subdict(target, stated_keys)
+        return cls(stated_kwargs, MoveToTarget, mobject)
+
+    @classmethod
+    def from_method(cls, stated_keys: list[str], method: MethodType, *args,
+                    **kwargs):
+        return cls.from_function(stated_keys, method.__func__, method.__self__,
+                                 *args, **kwargs)
+
     def begin(self):
         self.animation.begin()
 
@@ -26,22 +41,6 @@ class StatedAnimation(Animation):
         self.mobject.__dict__.update(self.stated_kwargs)
 
 
-def StatedFunctionAnimation(stated_keys: list[str], func: FunctionType,
-                            mobject: Mobject, *args,
-                            **kwargs) -> StatedAnimation:
-    mobject.generate_target()
-    target = mobject.target
-    func(target, *args, **kwargs)
-    stated_kwargs = __subdict(target, stated_keys)
-    return StatedAnimation(stated_kwargs, MoveToTarget, mobject)
-
-
-def StatedMethodAnimation(stated_keys: list[str], method: MethodType, *args,
-                          **kwargs):
-    return StatedFunctionAnimation(stated_keys, method.__func__,
-                                   method.__self__, *args, **kwargs)
-
-
 def StatedFunction(*stated_keys):
 
     def decorator(func: FunctionType):
@@ -51,8 +50,8 @@ def StatedFunction(*stated_keys):
                     return_animation: bool = False,
                     **kwargs):
             if return_animation:
-                return StatedFunctionAnimation(stated_keys, func, mobject,
-                                               *args, **kwargs)
+                return StatedAnimation.from_function(stated_keys, func,
+                                                     mobject, *args, **kwargs)
             else:
                 return func(mobject, *args, **kwargs)
 
@@ -83,40 +82,12 @@ def __kwargs_select(kwargs: dict[str, object],
         }
 
 
-class code_pack:
-
-    def __init__(self):
-        self.code_pack = []
-        self.code_buffer = []
-
-    def buf(self, *code):
-        for code_str in code:
-            self.code_buffer.append(code_str)
-        return self
-
-    def block(self):
-        if self.code_buffer:
-            self.code_pack.append(self.code_buffer)
-            self.code_buffer = []
-        return self
-
-    def buf_and_block(self, *code):
-        return self.buf(*code).block()
-
-    @property
-    def pack(self):
-        self.block()
-        return self.code_pack
-
-    def exec(self, globals=None, locals=None):
-        for block in self.pack:
-            for exp in block:
-                exec(exp, globals, locals)
 
 
 ### test ###
 
 
+from manim_tools_pseudocode import *
 class TestScene(Scene):
 
     class StatedInt(Integer):
@@ -131,29 +102,41 @@ class TestScene(Scene):
 
     def construct(self):
         mobj = Integer().shift(LEFT * 2)
-        logger = self._show(mobj)
+        logger = self._show(mobj,TestScene.unstated_code)
 
         stated_mobj = TestScene.StatedInt().shift(RIGHT * 2)
-        stated_logger = self._show(stated_mobj)
+        stated_logger = self._show(stated_mobj,TestScene.unstated_code)
 
-    unstated_code = code_pack().buf_and_block(
-        "mobj.set_value(1)", "self.play(ShowCreation(mobj))").buf_and_block(
-            "mobj.set_value(2)", "self.play(Indicate(mobj))").buf_and_block(
-                "TestScene.set_value_func(mobj, 3)",
-                "self.play(Indicate(mobj))").buf_and_block(
-                    "self.play(mobj.set_value, 4)").buf_and_block(
-                        "self.play(mobj.set_value, 5)").buf_and_block(
-                            "self.play(Indicate(mobj))").buf_and_block(
-                                "mobj.set_value(7)",
-                                "self.play(Indicate(mobj))")
+    @pseudocode(
+        "789c8b8e562a2e492c2a3154d28956cacd4fcad22b4e2d892f4bcc294dd530d454d2512a4ecd49d32bc849acd408cec82f772e4a4d2cc9cccfd30029d5d4548a8d056a33c2a2d70855af675e4a667262492a8a3e6390be90d4e292e0e4d4bc5484e6f8b4d2bc64b04a1d056322cc310199835083ea121d0513a83253fcca4ca1cab20bd01462b5d31c8b9fcd09b935160071d577ec"
+    )
+    def unstated_code(s1):
+        mobj.set_value(1)
+        self.play(ShowCreation(mobj))
+        ### 2
+        mobj.set_value(2)
+        self.play(Indicate(mobj))
+        ### 3
+        TestScene.set_value_func(mobj, 3)
+        self.play(Indicate(mobj))
+        ### 4
+        self.play(mobj.set_value, 4)
+        ### 5
+        self.play(mobj.set_value, 5)
+        ### kp5
+        self.play(Indicate(mobj))
+        ### 7
+        mobj.set_value(7)
+        self.play(Indicate(mobj))
 
-    def _show(self, mobj: Integer) -> Integer:
+    def _show(self, mobj: Integer, code) -> Integer:
         logger = Integer().next_to(mobj, DOWN)
         logger.add_updater(lambda self: self.set_value(mobj.get_value()))
         scene_title = Text("Scene:").next_to(mobj, LEFT)
         logger_title = Text("Real :").next_to(logger, LEFT)
         self.add(logger, scene_title, logger_title)
 
-        TestScene.unstated_code.exec(globals=globals(), locals=locals())
-
+        for _, lines in code():
+            exec("\n".join(lines),globals(),locals())
+        
         return logger
